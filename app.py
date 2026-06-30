@@ -1,41 +1,40 @@
 import streamlit as st
+import os
+import tempfile
+
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
-import tempfile
-import os
 
-st.set_page_config(page_title="ECE Research Assistant", layout="wide")
 
+# ---------------- UI ----------------
+st.set_page_config(page_title="ECE RAG Assistant", layout="wide")
 st.title("📘 ECE Research Assistant 🚀")
 
-# ✅ Get API key from Streamlit Cloud secrets / local env
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# ---------------- API KEY ----------------
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
-    st.warning("⚠️ GOOGLE_API_KEY not found in environment variables")
+    st.error("❌ GOOGLE_API_KEY not found in Streamlit Secrets")
+    st.stop()
 
-uploaded_file = st.file_uploader("Upload PDF", type="pdf")
-
-# -------------------------------
-# 🔥 Initialize embedding model (cache for speed)
-# -------------------------------
+# ---------------- EMBEDDINGS (cached) ----------------
 @st.cache_resource
-def get_embeddings():
+def load_embeddings():
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-embeddings = get_embeddings()
+embeddings = load_embeddings()
 
-# -------------------------------
-# Main Logic
-# -------------------------------
+# ---------------- FILE UPLOAD ----------------
+uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
+
 if uploaded_file is not None:
 
-    # Save PDF temporarily
+    # Save file temporarily
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
         temp_path = tmp_file.name
@@ -51,31 +50,33 @@ if uploaded_file is not None:
     )
     chunks = splitter.split_documents(documents)
 
-    st.success(f"PDF loaded ✔ | Chunks created: {len(chunks)}")
+    st.success(f"✅ PDF Loaded | Chunks created: {len(chunks)}")
 
-    # Vector DB (cached per session)
+    # Vector DB
     vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings
     )
 
-    query = st.text_input("💬 Ask a question from your PDF")
+    # ---------------- USER QUERY ----------------
+    query = st.text_input("Ask a question from your PDF")
 
     if query:
 
-        # Retrieve top chunks
+        # Retrieve relevant chunks
         docs = vectorstore.similarity_search(query, k=3)
         context = "\n\n".join([d.page_content for d in docs])
 
-        # ✅ FIXED GEMINI MODEL (stable version)
+        # ---------------- GEMINI LLM (FIXED) ----------------
         llm = ChatGoogleGenerativeAI(
             model="gemini-1.5-flash",
             temperature=0.2,
             google_api_key=GOOGLE_API_KEY
         )
 
+        # Prompt
         prompt = f"""
-You are an intelligent assistant.
+You are an expert assistant.
 Answer ONLY using the given context.
 
 Context:
@@ -85,7 +86,9 @@ Question:
 {query}
 """
 
+        # Get response
         response = llm.invoke(prompt)
 
+        # Output
         st.subheader("🧠 Answer")
         st.write(response.content)
