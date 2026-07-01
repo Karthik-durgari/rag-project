@@ -59,23 +59,23 @@ if uploaded_file is not None:
     )
 
     # ---------------- USER QUERY ----------------
-    query = st.text_input("Ask a question from your PDF")
+query = st.text_input("Ask a question from your PDF")
 
-    if query:
+if query:
 
-        # Retrieve relevant chunks
-        docs = vectorstore.similarity_search(query, k=3)
-        context = "\n\n".join([d.page_content for d in docs])
+    # Retrieve relevant chunks
+    docs = vectorstore.similarity_search(query, k=3)
+    context = "\n\n".join([d.page_content for d in docs])
 
-        # ---------------- GEMINI LLM (FIXED) ----------------
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            temperature=0.2,
-            google_api_key=GOOGLE_API_KEY
-        )
+    # Gemini LLM
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-flash-latest",
+        temperature=0.2,
+        google_api_key=GOOGLE_API_KEY
+    )
 
-        # Prompt
-        prompt = f"""
+    # Prompt
+    prompt = f"""
 You are an expert assistant.
 Answer ONLY using the given context.
 
@@ -86,9 +86,16 @@ Question:
 {query}
 """
 
-        # Get response
-        response = llm.invoke(prompt)
+    # Get response
+    response = llm.invoke(prompt)
 
-        # Output
-        st.subheader("🧠 Answer")
-        st.write(response.content)
+    # Output safely
+    st.subheader("🧠 Answer")
+
+    try:
+        if isinstance(response.content, list):
+            st.write(response.content[0]["text"])
+        else:
+            st.write(response.content)
+    except:
+        st.write(str(response))
