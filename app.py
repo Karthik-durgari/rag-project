@@ -8,11 +8,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-
 # ---------------- UI ----------------
 st.set_page_config(page_title="ECE RAG Assistant", layout="wide")
 st.title("📘 ECE Research Assistant 🚀")
-
 
 # ---------------- API KEY ----------------
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
@@ -20,7 +18,6 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 if not GOOGLE_API_KEY:
     st.error("❌ GOOGLE_API_KEY not found in environment variables")
     st.stop()
-
 
 # ---------------- EMBEDDINGS ----------------
 @st.cache_resource
@@ -31,7 +28,6 @@ def load_embeddings():
 
 embeddings = load_embeddings()
 
-
 # ---------------- SESSION STATE ----------------
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
@@ -39,22 +35,18 @@ if "vectorstore" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-
-# ---------------- RESET BUTTON (IMPORTANT FIX) ----------------
-if st.button("🆕 New Chat / Reset PDF"):
+# ---------------- FORCE RESET FUNCTION ----------------
+def reset_all():
     st.session_state.vectorstore = None
     st.session_state.chat_history = []
-    st.success("Reset done! Upload a new PDF 📄")
-
 
 # ---------------- FILE UPLOAD ----------------
 uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
 
 if uploaded_file is not None:
 
-    # 🚨 FORCE RESET OLD MEMORY (VERY IMPORTANT FIX)
-    st.session_state.vectorstore = None
-    st.session_state.chat_history = []
+    # 🔥 HARD RESET ON NEW FILE
+    reset_all()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
@@ -71,24 +63,22 @@ if uploaded_file is not None:
     chunks = splitter.split_documents(documents)
 
     st.success(f"✅ PDF Loaded | Chunks created: {len(chunks)}")
-    st.info("Now ask questions below 👇")
+    st.info("Now you can ask questions below 👇")
 
+    # 🔥 NEW VECTORSTORE EACH TIME
     st.session_state.vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings
     )
 
-
-# ---------------- QUERY INPUT ----------------
+# ---------------- QUERY ----------------
 query = st.text_input("Ask a question from your PDF")
-
 
 # ---------------- CHAT HISTORY ----------------
 if st.session_state.chat_history:
     st.subheader("💬 Chat History")
     for role, msg in st.session_state.chat_history:
         st.write(f"**{role}:** {msg}")
-
 
 # ---------------- RAG FLOW ----------------
 if query:
@@ -97,9 +87,15 @@ if query:
         st.error("Please upload a PDF first 📄")
         st.stop()
 
-    docs = st.session_state.vectorstore.similarity_search(query, k=3)
+    docs = st.session_state.vectorstore.similarity_search(query, k=4)
+
+    if not docs:
+        st.warning("No relevant content found in this PDF")
+        st.stop()
+
     context = "\n\n".join([d.page_content for d in docs])
 
+    # 🔥 STABLE MODEL (DO NOT CHANGE)
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0.2,
@@ -110,6 +106,7 @@ if query:
 You are an expert assistant.
 
 Answer ONLY using the context below.
+If answer is not in context, say "Not found in document".
 
 Context:
 {context}
