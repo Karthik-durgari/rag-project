@@ -13,14 +13,16 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 st.set_page_config(page_title="ECE RAG Assistant", layout="wide")
 st.title("📘 ECE Research Assistant 🚀")
 
+
 # ---------------- API KEY ----------------
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
-    st.error("❌ GOOGLE_API_KEY not found in Streamlit Secrets")
+    st.error("❌ GOOGLE_API_KEY not found in environment variables")
     st.stop()
 
-# ---------------- EMBEDDINGS (cached) ----------------
+
+# ---------------- EMBEDDINGS ----------------
 @st.cache_resource
 def load_embeddings():
     return HuggingFaceEmbeddings(
@@ -29,55 +31,85 @@ def load_embeddings():
 
 embeddings = load_embeddings()
 
+
+# ---------------- SESSION STATE ----------------
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+
+# ---------------- RESET BUTTON (IMPORTANT FIX) ----------------
+if st.button("🆕 New Chat / Reset PDF"):
+    st.session_state.vectorstore = None
+    st.session_state.chat_history = []
+    st.success("Reset done! Upload a new PDF 📄")
+
+
 # ---------------- FILE UPLOAD ----------------
 uploaded_file = st.file_uploader("Upload your PDF", type="pdf")
 
 if uploaded_file is not None:
 
-    # Save file temporarily
+    # 🚨 FORCE RESET OLD MEMORY (VERY IMPORTANT FIX)
+    st.session_state.vectorstore = None
+    st.session_state.chat_history = []
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
         temp_path = tmp_file.name
 
-    # Load PDF
     loader = PyPDFLoader(temp_path)
     documents = loader.load()
 
-    # Split into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=100
     )
+
     chunks = splitter.split_documents(documents)
 
     st.success(f"✅ PDF Loaded | Chunks created: {len(chunks)}")
+    st.info("Now ask questions below 👇")
 
-    # Vector DB
-    vectorstore = Chroma.from_documents(
+    st.session_state.vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings
     )
 
-    # ---------------- USER QUERY ----------------
+
+# ---------------- QUERY INPUT ----------------
 query = st.text_input("Ask a question from your PDF")
 
+
+# ---------------- CHAT HISTORY ----------------
+if st.session_state.chat_history:
+    st.subheader("💬 Chat History")
+    for role, msg in st.session_state.chat_history:
+        st.write(f"**{role}:** {msg}")
+
+
+# ---------------- RAG FLOW ----------------
 if query:
 
-    # Retrieve relevant chunks
-    docs = vectorstore.similarity_search(query, k=3)
+    if st.session_state.vectorstore is None:
+        st.error("Please upload a PDF first 📄")
+        st.stop()
+
+    docs = st.session_state.vectorstore.similarity_search(query, k=3)
     context = "\n\n".join([d.page_content for d in docs])
 
-    # Gemini LLM
     llm = ChatGoogleGenerativeAI(
-        model="gemini-flash-latest",
+        model="gemini-2.5-flash",
         temperature=0.2,
         google_api_key=GOOGLE_API_KEY
     )
 
-    # Prompt
     prompt = f"""
 You are an expert assistant.
-Answer ONLY using the given context.
+
+Answer ONLY using the context below.
 
 Context:
 {context}
@@ -86,16 +118,11 @@ Question:
 {query}
 """
 
-    # Get response
     response = llm.invoke(prompt)
+    answer = response.content if hasattr(response, "content") else str(response)
 
-    # Output safely
+    st.session_state.chat_history.append(("User", query))
+    st.session_state.chat_history.append(("Assistant", answer))
+
     st.subheader("🧠 Answer")
-
-    try:
-        if isinstance(response.content, list):
-            st.write(response.content[0]["text"])
-        else:
-            st.write(response.content)
-    except:
-        st.write(str(response))
+    st.write(answer)
